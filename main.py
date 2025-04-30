@@ -98,6 +98,33 @@ async def execute_azdo_command(mcp_client, command, args=None):
             repos = mcp_client.list_repositories(project, date_filter)
             result = [{"name": repo.get("name"), "id": repo.get("id")} for repo in repos]
             
+        elif command == "get_work_item":
+            # Nuevo comando para obtener un work item por ID
+            work_item_id = args.get("id") if args else None
+            project = args.get("project") if args else None
+            
+            if not work_item_id:
+                return {"error": "Se requiere el ID del work item"}
+                
+            work_item = mcp_client.azdo_tool.get_work_item(work_item_id, project)
+            
+            # Verificar si hubo un error al obtener el work item
+            if "error" in work_item:
+                return work_item
+                
+            # Formatear el resultado para que sea más fácil de leer
+            formatted_item = {
+                "id": work_item.get("id"),
+                "title": work_item.get("fields", {}).get("System.Title", "Sin título"),
+                "state": work_item.get("fields", {}).get("System.State", "Desconocido"),
+                "type": work_item.get("fields", {}).get("System.WorkItemType", "Desconocido"),
+                "assignedTo": work_item.get("fields", {}).get("System.AssignedTo", {}).get("displayName", "No asignado"),
+                "createdDate": work_item.get("fields", {}).get("System.CreatedDate", "Fecha desconocida"),
+                "description": work_item.get("fields", {}).get("System.Description", "Sin descripción")
+            }
+            
+            return formatted_item
+            
         elif command == "list_work_items":
             project = args.get("project") if args else None
             query = args.get("query") if args else None
@@ -190,6 +217,49 @@ async def interactive_chat(devops_agent, mcp_client):
                 result = await execute_azdo_command(mcp_client, "parse_natural_query", {"query_text": parts[1] if len(parts) > 1 else ""})
                 print(f"\n📋 Resultado de la consulta: {json.dumps(result, indent=2, ensure_ascii=False)}")
                 continue
+                
+            elif command in ["item", "workitem"]:
+                # Nuevo comando para obtener un work item por ID
+                if len(parts) > 1 and parts[1].isdigit():
+                    work_item_id = int(parts[1])
+                    result = await execute_azdo_command(mcp_client, "get_work_item", {"id": work_item_id})
+                    print(f"\n📋 Work Item: {json.dumps(result, indent=2, ensure_ascii=False)}")
+                else:
+                    print("\n❌ Error: Se requiere un ID numérico para obtener un work item")
+                continue
+        
+        # Buscar patrones de consulta de work items por ID
+        # Ejemplo: "dame información sobre el item 21101" o "muéstrame el work item 12345"
+        import re
+        work_item_id_match = re.search(r'(?:item|work item|workitem|tarea|bug|historia|epic)\s+#?(\d+)', user_input.lower())
+        
+        if work_item_id_match:
+            work_item_id = int(work_item_id_match.group(1))
+            if debug_mode:
+                print(f"\n[DEBUG] Detectada solicitud de work item por ID: {work_item_id}")
+                
+            # Obtener el work item usando la API
+            result = await execute_azdo_command(mcp_client, "get_work_item", {"id": work_item_id})
+            
+            # Verificar si se encontró el work item
+            if not result or "error" in result:
+                error_msg = result.get("error") if result and "error" in result else "No se pudo encontrar el work item solicitado"
+                print(f"\n🤖 AGENTE DEVOPS: {error_msg}")
+                continue
+                
+            # Formatear la respuesta para mostrarla al usuario
+            formatted_response = f"He encontrado la información del work item {work_item_id}:\n\n"
+            formatted_response += f"📌 Título: {result.get('title', 'No disponible')}\n"
+            formatted_response += f"📊 Tipo: {result.get('type', 'No disponible')}\n"
+            formatted_response += f"🚦 Estado: {result.get('state', 'No disponible')}\n"
+            formatted_response += f"👤 Asignado a: {result.get('assignedTo', 'No asignado')}\n"
+            formatted_response += f"📅 Fecha de creación: {result.get('createdDate', 'No disponible')}\n"
+            
+            if result.get('description'):
+                formatted_response += f"\n📝 Descripción: {result.get('description')}\n"
+                
+            print(f"\n🤖 AGENTE DEVOPS: {formatted_response}")
+            continue
         
         # Verificar si es una consulta en lenguaje natural sobre fechas
         date_indicators = ["2025", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", 

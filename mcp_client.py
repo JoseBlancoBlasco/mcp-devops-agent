@@ -67,20 +67,46 @@ class DevOpsMCPClient:
             self.initialize()
         
         try:
-            # Aquí podríamos registrar herramientas adicionales si fuera necesario
-            # Las herramientas de Azure DevOps ya están inicializadas en 'self.azdo_tool'
-            print("Herramientas de Azure DevOps registradas y operativas:")
-            print("  - Gestión de repositorios")
-            print("  - Gestión de pipelines")
-            print("  - Gestión de work items")
-            print("  - Gestión de pull requests")
-            print("  - Filtrado por fecha (nuevo)")
+            from azdo_tools import list_available_tools, register_azdo_tools_with_mcp
+            
+            # Registrar las herramientas con MCP
+            registered_tools = register_azdo_tools_with_mcp()
+            
+            # Obtener y mostrar las herramientas disponibles
+            available_tools = list_available_tools()
+            print("\nHerramientas de Azure DevOps disponibles:")
+            for tool in available_tools:
+                print(f"  - {tool['name']}: {tool['description']}")
+                
+            return registered_tools
+            
         except Exception as e:
             print(f"Error al registrar herramientas personalizadas: {str(e)}")
             
         return []
     
     # === Métodos de ayuda para acceder a Azure DevOps ===
+    
+    def get_work_item(self, work_item_id, project=None):
+        """
+        Obtener detalles de un work item específico por su ID
+        
+        Args:
+            work_item_id: ID del work item a obtener
+            project: Proyecto de Azure DevOps (opcional)
+            
+        Returns:
+            Diccionario con los detalles del work item o mensaje de error
+        """
+        if not self.azdo_tool:
+            print("Cliente Azure DevOps no inicializado")
+            return {"error": "Cliente Azure DevOps no inicializado"}
+        
+        try:
+            return self.azdo_tool.get_work_item(work_item_id, project)
+        except Exception as e:
+            print(f"Error al obtener work item {work_item_id}: {str(e)}")
+            return {"error": f"Error al obtener work item {work_item_id}: {str(e)}"}
     
     def list_repositories(self, project=None, date_filter=None):
         """

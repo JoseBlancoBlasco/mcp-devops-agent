@@ -1,26 +1,93 @@
 import os
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 import requests
 from dotenv import load_dotenv
 import base64
-import json
-import datetime
 from dateutil import parser as date_parser
 from datetime import datetime, timedelta
-from typing import Tuple
+import re
 
 # Cargar variables de entorno
 load_dotenv()
 
+def register_azdo_tools_with_mcp():
+    """
+    Registra las herramientas de Azure DevOps con el servidor MCP.
+    Esta función es llamada por el cliente MCP para registrar las funcionalidades
+    de interacción con Azure DevOps.
+    
+    Returns:
+        List: Lista de herramientas registradas
+    """
+    # Crear lista de herramientas disponibles para registro MCP
+    available_tools = [
+        {
+            "name": "list_repositories",
+            "description": "Listar repositorios en Azure DevOps",
+        },
+        {
+            "name": "list_work_items",
+            "description": "Listar work items en Azure DevOps con filtrado por tipo, fecha y estado",
+        },
+        {
+            "name": "list_pipelines",
+            "description": "Listar pipelines en Azure DevOps",
+        },
+        {
+            "name": "filter_by_date",
+            "description": "Filtrar recursos por fecha usando lenguaje natural",
+        }
+    ]
+    
+    print("Registrando herramientas de Azure DevOps con el servidor MCP:")
+    for tool in available_tools:
+        print(f"  - {tool['name']}: {tool['description']}")
+        
+    return available_tools
+
+def list_available_tools():
+    """
+    Devuelve una lista de las herramientas disponibles en la clase AzureDevOpsTool
+    
+    Returns:
+        List[Dict]: Lista de diccionarios con nombre y descripción de cada herramienta
+    """
+    tools = [
+        {
+            "name": "list_repositories",
+            "description": "Lista repositorios de Azure DevOps con opciones de filtrado por fecha"
+        },
+        {
+            "name": "list_work_items", 
+            "description": "Lista work items con filtrado por tipo, fecha, proyecto y estado"
+        },
+        {
+            "name": "list_pipelines",
+            "description": "Lista pipelines de Azure DevOps con filtrado por fecha"
+        },
+        {
+            "name": "get_work_item",
+            "description": "Obtiene detalles de un work item específico por su ID"
+        },
+        {
+            "name": "search_work_items_by_type_and_date",
+            "description": "Búsqueda especializada de work items filtrando por tipo y fecha"
+        },
+        {
+            "name": "parse_natural_language_date",
+            "description": "Convierte expresiones de fecha en lenguaje natural a rangos de fechas específicos"
+        }
+    ]
+    return tools
+
 class AzureDevOpsTool:
-    """Clase para interactuar con Azure DevOps API utilizando PAT"""
+    """Clase para interactuar con Azure DevOps API utilizando PAT (simplificada para operaciones de items)"""
     
     def __init__(self):
         """Inicializar con credenciales desde variables de entorno"""
         self.pat = os.environ.get("AZDO_PAT")
         self.organization = os.environ.get("AZDO_ORG")
         self.project = os.environ.get("AZDO_PROJECT", "")  # Ahora es opcional
-        self.repo = os.environ.get("AZDO_REPO", "")  # Ahora es opcional
         
         if not all([self.pat, self.organization]):
             raise ValueError("Faltan credenciales de Azure DevOps en el archivo .env (AZDO_PAT, AZDO_ORG son obligatorios)")
@@ -48,8 +115,6 @@ class AzureDevOpsTool:
         Returns:
             tuple: (from_date, to_date) in YYYY-MM-DD format
         """
-        from datetime import datetime, timedelta
-        
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         date_filter = date_filter.lower().strip()
         
@@ -83,7 +148,6 @@ class AzureDevOpsTool:
             return start_of_last_year.strftime('%Y-%m-%d'), end_of_last_year.strftime('%Y-%m-%d')
             
         # More complex patterns with regex
-        import re
         
         # Handle "last X days"
         last_n_days_match = re.match(r'last (\d+) days?', date_filter)
@@ -203,174 +267,101 @@ class AzureDevOpsTool:
                 
         return filtered_items
     
-    # ==== USER TOOLS ====
-    def get_me(self) -> Dict[str, Any]:
-        """Obtener información del usuario autenticado"""
-        url = f"{self.organization}/_apis/graph/me?api-version=7.0"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
-    
-    # ==== ORGANIZATION TOOLS ====
-    def list_organizations(self) -> List[Dict[str, Any]]:
-        """Listar todas las organizaciones accesibles"""
-        # Como estamos usando PAT y ya tenemos una organización configurada, devolvemos esa
-        # En un entorno real con Azure CLI auth se podría listar todas las orgs
-        return [{"name": self.organization.split('/')[-2], "url": self.organization}]
-    
-    # ==== PROJECT TOOLS ====
-    def list_projects(self) -> List[Dict[str, Any]]:
-        """Listar todos los proyectos en una organización"""
-        url = f"{self.organization}/_apis/projects?api-version=7.0"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json().get('value', [])
-    
-    def get_project(self, project: str) -> Dict[str, Any]:
-        """Obtener detalles de un proyecto específico"""
-        url = f"{self.organization}/_apis/projects/{project}?api-version=7.0"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
-    
-    def get_project_details(self, project: str) -> Dict[str, Any]:
-        """Obtener detalles completos de un proyecto incluyendo proceso, tipos de work items y equipos"""
-        # Básico del proyecto
-        project_info = self.get_project(project)
-        
-        # Tipos de work items
-        wit_url = f"{self.organization}/{project}/_apis/wit/workitemtypes?api-version=7.0"
-        wit_response = requests.get(wit_url, headers=self.headers)
-        wit_response.raise_for_status()
-        
-        # Equipos
-        teams_url = f"{self.organization}/_apis/projects/{project}/teams?api-version=7.0"
-        teams_response = requests.get(teams_url, headers=self.headers)
-        teams_response.raise_for_status()
-        
-        # Combinar toda la información
-        combined_info = {
-            "project": project_info,
-            "workItemTypes": wit_response.json().get('value', []),
-            "teams": teams_response.json().get('value', [])
-        }
-        
-        return combined_info
-    
     # ==== REPOSITORY TOOLS ====
     def list_repositories(self, project: Optional[str] = None, date_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Listar los repositorios disponibles en el proyecto
+        Lista los repositorios en un proyecto de Azure DevOps
         
         Args:
-            project: Nombre del proyecto
+            project: Nombre del proyecto de Azure DevOps (opcional, usa el predeterminado si no se proporciona)
             date_filter: Filtro de fecha en lenguaje natural (ej. "2025", "enero 2025")
             
         Returns:
-            Lista de repositorios filtrados
+            Lista de repositorios
         """
         project_to_use = project or self.project
         if not project_to_use:
             raise ValueError("Se requiere un proyecto para listar repositorios")
             
         url = f"{self.organization}/{project_to_use}/_apis/git/repositories?api-version=7.0"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        repos = response.json().get('value', [])
         
-        # Si hay un filtro de fecha, aplicarlo
-        if date_filter:
-            # Para cada repo, obtener información más detallada incluyendo fecha de creación
-            detailed_repos = []
-            for repo in repos:
-                try:
-                    repo_id = repo.get('id')
-                    repo_url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repo_id}?api-version=7.0"
-                    repo_response = requests.get(repo_url, headers=self.headers)
-                    if repo_response.status_code == 200:
-                        detailed_repos.append(repo_response.json())
-                    else:
-                        detailed_repos.append(repo)  # Fallback to basic info
-                except Exception:
-                    detailed_repos.append(repo)  # Fallback to basic info
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            repositories = response.json().get('value', [])
             
-            # Filtrar por fecha de creación
-            return self._filter_by_date(detailed_repos, "createdDate", date_filter)
+            # Aplicar filtro de fecha si se proporciona
+            if date_filter:
+                return self._filter_by_date(repositories, "createdDate", date_filter)
             
-        return repos
+            return repositories
+        except Exception as e:
+            print(f"Error al listar repositorios: {str(e)}")
+            return []
     
-    def get_repository(self, repository_id: str, project: Optional[str] = None) -> Dict[str, Any]:
-        """Obtener detalles de un repositorio específico"""
+    # ==== PIPELINE TOOLS ====
+    def list_pipelines(self, project: Optional[str] = None, date_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Lista los pipelines en un proyecto de Azure DevOps
+        
+        Args:
+            project: Nombre del proyecto de Azure DevOps (opcional, usa el predeterminado si no se proporciona)
+            date_filter: Filtro de fecha en lenguaje natural (ej. "2025", "enero 2025")
+            
+        Returns:
+            Lista de pipelines
+        """
         project_to_use = project or self.project
         if not project_to_use:
-            raise ValueError("Se requiere un proyecto para obtener un repositorio")
+            raise ValueError("Se requiere un proyecto para listar pipelines")
             
-        url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}?api-version=7.0"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
-    
-    def get_repository_details(self, repository_id: str, project: Optional[str] = None) -> Dict[str, Any]:
-        """Obtener información detallada sobre un repositorio incluyendo estadísticas y referencias"""
-        repo_info = self.get_repository(repository_id, project)
+        url = f"{self.organization}/{project_to_use}/_apis/pipelines?api-version=7.0"
         
-        # Obtener refs (ramas, tags)
-        project_to_use = project or self.project
-        refs_url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/refs?api-version=7.0"
-        refs_response = requests.get(refs_url, headers=self.headers)
-        refs_response.raise_for_status()
-        
-        # Estadísticas básicas
-        stats_url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/stats/branches?api-version=7.0"
-        stats_response = requests.get(stats_url, headers=self.headers)
-        stats_info = []
-        if stats_response.status_code == 200:
-            stats_info = stats_response.json().get('value', [])
-        
-        # Combinar toda la información
-        combined_info = {
-            "repository": repo_info,
-            "refs": refs_response.json().get('value', []),
-            "stats": stats_info
-        }
-        
-        return combined_info
-    
-    def get_file_content(self, repository_id: str, path: str, branch: str = "main", project: Optional[str] = None) -> Union[Dict[str, Any], str]:
-        """Obtener contenido de un archivo o directorio de un repositorio"""
-        project_to_use = project or self.project
-        if not project_to_use:
-            raise ValueError("Se requiere un proyecto para obtener contenido de archivos")
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            pipelines = response.json().get('value', [])
             
-        # Primero obtener el item para determinar si es archivo o directorio
-        item_url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/items?path={path}&versionDescriptor.version={branch}&api-version=7.0"
-        item_response = requests.get(item_url, headers=self.headers)
-        item_response.raise_for_status()
-        
-        # Si es directorio, devolver lista de items
-        if "isFolder" in item_response.json() and item_response.json()["isFolder"]:
-            items_url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/items?path={path}&versionDescriptor.version={branch}&recursionLevel=OneLevel&api-version=7.0"
-            items_response = requests.get(items_url, headers=self.headers)
-            items_response.raise_for_status()
-            return items_response.json()
-        
-        # Si es archivo, obtener su contenido como texto
-        content_url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/items?path={path}&versionDescriptor.version={branch}&download=true&api-version=7.0"
-        content_response = requests.get(content_url, headers=self.headers)
-        content_response.raise_for_status()
-        return content_response.text
+            # Aplicar filtro de fecha si se proporciona
+            if date_filter:
+                return self._filter_by_date(pipelines, "createdDate", date_filter)
+            
+            return pipelines
+        except Exception as e:
+            print(f"Error al listar pipelines: {str(e)}")
+            return []
     
     # ==== WORK ITEM TOOLS ====
     def get_work_item(self, work_item_id: int, project: Optional[str] = None) -> Dict[str, Any]:
-        """Obtener un work item por ID"""
+        """
+        Obtener un work item por ID
+        
+        Args:
+            work_item_id: ID del work item a obtener
+            project: Nombre del proyecto de Azure DevOps (opcional, usa el predeterminado si no se proporciona)
+            
+        Returns:
+            Detalles del work item o diccionario vacío si no se encuentra
+        """
         project_to_use = project or self.project
         if not project_to_use:
             raise ValueError("Se requiere un proyecto para obtener work items")
             
         url = f"{self.organization}/{project_to_use}/_apis/wit/workitems/{work_item_id}?$expand=all&api-version=7.0"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
+        
+        try:
+            response = requests.get(url, headers=self.headers)
+            
+            # Si el work item no existe, devolver un mensaje claro
+            if response.status_code == 404:
+                print(f"Work item con ID {work_item_id} no encontrado")
+                return {"error": f"Work item con ID {work_item_id} no encontrado"}
+                
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error al obtener work item {work_item_id}: {str(e)}")
+            return {"error": f"Error al obtener work item {work_item_id}: {str(e)}"}
     
     def list_work_items(self, query_string: str = None, project: Optional[str] = None, work_item_type: Optional[str] = None, date_filter: Optional[str] = None, state: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -493,160 +484,3 @@ class AzureDevOpsTool:
             date_filter=date_filter,
             state=state
         )
-    
-    # ==== PIPELINES TOOLS ====
-    def list_pipelines(self, project: Optional[str] = None, date_filter: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Listar pipelines disponibles en el proyecto
-        
-        Args:
-            project: Nombre del proyecto
-            date_filter: Filtro de fecha en lenguaje natural
-            
-        Returns:
-            Lista de pipelines filtrados
-        """
-        project_to_use = project or self.project
-        if not project_to_use:
-            raise ValueError("Se requiere un proyecto para listar pipelines")
-            
-        url = f"{self.organization}/{project_to_use}/_apis/pipelines?api-version=7.0"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        pipelines = response.json().get('value', [])
-        
-        # Si hay un filtro de fecha, aplicarlo
-        if date_filter:
-            # Para cada pipeline, obtener información detallada incluyendo historial
-            detailed_pipelines = []
-            for pipeline in pipelines:
-                try:
-                    pipeline_id = pipeline.get('id')
-                    runs_url = f"{self.organization}/{project_to_use}/_apis/pipelines/{pipeline_id}/runs?api-version=7.0"
-                    runs_response = requests.get(runs_url, headers=self.headers)
-                    if runs_response.status_code == 200:
-                        runs = runs_response.json().get('value', [])
-                        if runs:
-                            # Añadir el run más reciente al pipeline
-                            pipeline['latestRun'] = runs[0]
-                    detailed_pipelines.append(pipeline)
-                except Exception:
-                    detailed_pipelines.append(pipeline)
-            
-            # Filtrar por fecha de creación del pipeline o fecha del último run
-            return self._filter_by_date(detailed_pipelines, "latestRun.createdDate", date_filter)
-            
-        return pipelines
-    
-    # ==== PULL REQUEST TOOLS ====
-    def create_pull_request(self, 
-                           source_branch: str, 
-                           target_branch: str, 
-                           title: str, 
-                           description: str,
-                           repository_id: str,
-                           project: Optional[str] = None) -> Dict[str, Any]:
-        """Crear un nuevo pull request entre ramas en un repositorio"""
-        project_to_use = project or self.project
-        if not project_to_use:
-            raise ValueError("Se requiere un proyecto para crear un pull request")
-            
-        url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/pullrequests?api-version=7.0"
-        
-        payload = {
-            "sourceRefName": f"refs/heads/{source_branch}",
-            "targetRefName": f"refs/heads/{target_branch}",
-            "title": title,
-            "description": description
-        }
-        
-        response = requests.post(url, headers=self.headers, json=payload)
-        response.raise_for_status()
-        return response.json()
-    
-    def list_pull_requests(self, 
-                          repository_id: Optional[str] = None, 
-                          status: str = "active", 
-                          project: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Listar y filtrar pull requests en un proyecto o repositorio"""
-        project_to_use = project or self.project
-        if not project_to_use:
-            raise ValueError("Se requiere un proyecto para listar pull requests")
-        
-        # Construir URL según tengamos repositorio o no
-        if repository_id:
-            url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/pullrequests?searchCriteria.status={status}&api-version=7.0"
-        else:
-            url = f"{self.organization}/{project_to_use}/_apis/git/pullrequests?searchCriteria.status={status}&api-version=7.0"
-        
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json().get('value', [])
-    
-    def get_pull_request_comments(self, pull_request_id: int, repository_id: str, project: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Obtener comentarios y hilos de comentarios de un pull request específico"""
-        project_to_use = project or self.project
-        if not project_to_use:
-            raise ValueError("Se requiere un proyecto para obtener comentarios de pull requests")
-            
-        url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/pullRequests/{pull_request_id}/threads?api-version=7.0"
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json().get('value', [])
-    
-    def add_pull_request_comment(self, 
-                               pull_request_id: int, 
-                               repository_id: str, 
-                               comment: str, 
-                               thread_id: Optional[int] = None,
-                               project: Optional[str] = None) -> Dict[str, Any]:
-        """Añadir un comentario a un pull request (responder a comentarios existentes o crear nuevos hilos)"""
-        project_to_use = project or self.project
-        if not project_to_use:
-            raise ValueError("Se requiere un proyecto para añadir comentarios a pull requests")
-        
-        # Si no hay thread_id, crear un nuevo hilo
-        if thread_id is None:
-            # Crear un nuevo hilo
-            thread_url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/pullRequests/{pull_request_id}/threads?api-version=7.0"
-            thread_payload = {
-                "comments": [{
-                    "content": comment
-                }]
-            }
-            response = requests.post(thread_url, headers=self.headers, json=thread_payload)
-        else:
-            # Añadir a hilo existente
-            comment_url = f"{self.organization}/{project_to_use}/_apis/git/repositories/{repository_id}/pullRequests/{pull_request_id}/threads/{thread_id}/comments?api-version=7.0"
-            comment_payload = {
-                "content": comment
-            }
-            response = requests.post(comment_url, headers=self.headers, json=comment_payload)
-        
-        response.raise_for_status()
-        return response.json()
-
-# Funciones para registrar con MCP
-def register_azdo_tools_with_mcp(mcp_tool, tool_idx=0):
-    """
-    Registrar herramientas Azure DevOps con una herramienta MCP
-    
-    Args:
-        mcp_tool: Una herramienta MCP (StdioMcpToolAdapter o similar)
-        tool_idx: Índice de la herramienta (solo informativo)
-        
-    Returns:
-        La herramienta MCP modificada o None si hubo un error
-    """
-    try:
-        azdo = AzureDevOpsTool()
-        print(f"Registrando herramientas de Azure DevOps con adaptador MCP #{tool_idx}")
-        
-        # En la nueva implementación, no registramos herramientas directamente con el cliente
-        # En lugar de eso, ya tenemos adaptadores de herramientas creados por mcp_server_tools
-        # Solo devolvemos el mismo adaptador
-        
-        return mcp_tool
-    except Exception as e:
-        print(f"Error al registrar herramientas de Azure DevOps: {str(e)}")
-        return None
