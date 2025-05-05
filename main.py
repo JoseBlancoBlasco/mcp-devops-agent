@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 import time
@@ -13,6 +14,7 @@ from azdo_tools import AzureDevOpsTool
 import asyncio
 import json
 import datetime
+from devops_server import serve
 
 # Cargar variables de entorno
 load_dotenv()
@@ -250,7 +252,42 @@ async def interactive_chat(devops_agent, mcp_client):
                 import traceback
                 traceback.print_exc()
 
-def main():
+async def start_mcp_environment():
+    """
+    Iniciar el entorno MCP y obtener las herramientas para el agente
+    siguiendo el enfoque simplificado recomendado en el blog de Victor Dibia.
+    """
+    try:
+        print("Iniciando entorno MCP para Azure DevOps...")
+        
+        # Crear e iniciar el servidor MCP personalizado
+        mcp_server = DevOpsMCPServer(command="python -m mcp.server")
+        mcp_server.start()
+        
+        # Esperar a que el servidor se inicie completamente
+        time.sleep(2)
+        
+        # Obtener todas las herramientas disponibles (MCP base + personalizadas)
+        # usando el nuevo método de la clase DevOpsMCPServer
+        all_tools = await mcp_server.get_all_tools()
+        
+        print(f"Total de herramientas disponibles: {len(all_tools)}")
+        for i, tool in enumerate(all_tools, 1):
+            # Manejar tanto objetos Tool como diccionarios
+            tool_name = tool.name if hasattr(tool, 'name') else tool.get('name', 'Sin nombre')
+            tool_desc = tool.description if hasattr(tool, 'description') else tool.get('description', 'Sin descripción')
+            print(f"  {i}. {tool_name}: {tool_desc}")
+        
+        return mcp_server, all_tools
+        
+    except Exception as e:
+        print(f"Error al iniciar el entorno MCP: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None, []
+
+async def main_async():
+    """Función principal asíncrona para iniciar el agente DevOps con MCP"""
     mcp_server = None
     try:
         # Verificar y mostrar variables de entorno (sin revelar valores sensibles)
@@ -282,20 +319,11 @@ def main():
         except (ImportError, AttributeError):
             print("¡Advertencia! No se pudo verificar la instalación de MCP.")
         
-        # Iniciar servidor MCP - usando el módulo MCP directamente
-        print("Iniciando entorno MCP para DevOps...")
-        command = "python -m mcp.server"
-        
-        # Crear servidor MCP
-        mcp_server = DevOpsMCPServer(command=command)
-        mcp_server.start()
-        
-        # Pausa para asegurar que el servidor está listo
-        time.sleep(2)
-        
-        # Crear cliente MCP con el mismo comando
-        mcp_client = DevOpsMCPClient(command=command)
-        mcp_client.initialize()
+        # Iniciar entorno MCP y obtener herramientas usando el enfoque simplificado
+        mcp_server, mcp_tools = await start_mcp_environment()
+        if not mcp_server or not mcp_tools:
+            print("No se pudo iniciar el entorno MCP. Saliendo...")
+            return
         
         # Crear el cliente del modelo para Azure OpenAI
         az_model_client = create_azure_model_client()
@@ -303,17 +331,22 @@ def main():
         # Crear agente DevOps
         devops_agent = create_devops_agent(az_model_client)
         
-        # Registrar herramientas MCP con el agente
-        mcp_client.register_to_agent(devops_agent)
-        mcp_client.register_custom_tools()
+        # Asignar todas las herramientas MCP al agente DevOps
+        # Este es el enfoque simplificado mencionado en el blog (básicamente 2 líneas de código)
+        devops_agent.tools = mcp_tools
+        print(f"Herramientas MCP asignadas al agente: {len(mcp_tools)}")
         
         # Iniciar conversación interactiva
         print("\n" + "="*50)
-        print("Agente DevOps MCP iniciado.")
+        print("Agente DevOps MCP iniciado con enfoque simplificado.")
         print("="*50 + "\n")
         
+        # Crear cliente MCP para funciones de utilidad (principalmente para comandos directos)
+        mcp_client = DevOpsMCPClient(command="python -m mcp.server")
+        mcp_client.initialize()
+        
         # Iniciar chat interactivo
-        asyncio.run(interactive_chat(devops_agent, mcp_client))
+        await interactive_chat(devops_agent, mcp_client)
     
     except Exception as e:
         print(f"Error al ejecutar el agente: {str(e)}")
@@ -326,6 +359,16 @@ def main():
             print("\nDeteniendo servidor MCP...")
             mcp_server.stop()
             print("Servidor MCP detenido.")
+
+def main():
+    """Punto de entrada principal para el servidor MCP de Azure DevOps."""
+    print("Iniciando servidor MCP para Azure DevOps...")
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        print("\nServidor detenido por el usuario")
+    except Exception as e:
+        print(f"Error en el servidor: {str(e)}")
 
 if __name__ == "__main__":
     main()
