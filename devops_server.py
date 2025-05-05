@@ -91,6 +91,10 @@ class PullRequestCommentCreate(BaseModel):
     comment: Annotated[str, Field(description="Texto del comentario a añadir")]
     thread_id: Annotated[Optional[int], Field(default=None, description="ID del hilo de comentarios (para responder a un comentario existente)")]
 
+class GetMeQuery(BaseModel):
+    """No necesita parámetros para obtener información del usuario autenticado"""
+    pass
+
 
 async def serve() -> None:
     """Ejecutar el servidor MCP para Azure DevOps."""
@@ -161,6 +165,11 @@ async def serve() -> None:
                 name="add_pull_request_comment",
                 description="Añade un comentario a un pull request existente.",
                 inputSchema=PullRequestCommentCreate.model_json_schema(),
+            ),
+            Tool(
+                name="get_me",
+                description="Obtiene información del usuario autenticado en Azure DevOps.",
+                inputSchema=GetMeQuery.model_json_schema(),
             ),
         ]
     
@@ -243,6 +252,41 @@ async def serve() -> None:
                     result += f"   Último cambio: {project.get('lastUpdateTime')}\n"
                     result += f"   URL: {project.get('url')}\n\n"
                 
+                return [TextContent(type="text", text=result)]
+            
+            elif name == "get_me":
+                try:
+                    args = GetMeQuery(**arguments)
+                except ValueError as e:
+                    raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+                
+                # Obtener información del usuario
+                user_info = azdo.get_me()
+                
+                # Formatear la respuesta como texto
+                if user_info:
+                    result = f"Información del usuario autenticado:\n\n"
+                    
+                    # Añadir datos principales del usuario
+                    result += f"📋 Detalles del usuario:\n"
+                    result += f"- Nombre: {user_info.get('displayName', 'No disponible')}\n"
+                    result += f"- Email: {user_info.get('mailAddress', 'No disponible')}\n"
+                    result += f"- ID: {user_info.get('id', 'No disponible')}\n"
+                    
+                    # Añadir detalles adicionales si están disponibles
+                    if 'descriptor' in user_info:
+                        result += f"- Descriptor: {user_info.get('descriptor')}\n"
+                        
+                    # Añadir roles y permisos si están disponibles
+                    if 'directoryAlias' in user_info:
+                        result += f"- Alias: {user_info.get('directoryAlias')}\n"
+                        
+                    # URL de perfil
+                    if 'url' in user_info:
+                        result += f"\nURL del perfil: {user_info.get('url')}\n"
+                else:
+                    result = "No se pudo obtener información del usuario autenticado."
+                    
                 return [TextContent(type="text", text=result)]
             
             elif name == "list_work_items":

@@ -80,7 +80,8 @@ Puedes usar estas herramientas para:
 Cuando te soliciten información sobre Azure DevOps, SIEMPRE usa las herramientas MCP disponibles
 para obtener datos en tiempo real, en lugar de proporcionar información estática.
 
-Responde de manera concisa y en español a menos que se te solicite otro idioma.""",
+Responde de manera concisa y en español a menos que se te solicite otro idioma.
+Formatea la respuesta para que sea legible por el usuario en formato markdown.""",
             model_client=model_client,
             tools=azdo_tools
         )
@@ -128,9 +129,21 @@ Responde de manera concisa y en español a menos que se te solicite otro idioma.
                 for msg in result.messages:
                     if msg.source == "devops_expert":
                         # Si el contenido es una llamada a función o resultado de función, formatear
-                        if str(msg.content).startswith("[FunctionCall(") or str(msg.content).startswith("[FunctionExecutionResult("):
+                        if str(msg.content).startswith("[FunctionCall("):
                             if "FunctionCall" in str(msg.content):
                                 print("\n   🔧 Consultando Azure DevOps...", end="")
+                            continue
+                        # Mostrar resultados de funciones ejecutadas
+                        elif str(msg.content).startswith("[FunctionExecutionResult("):
+                            result_data = str(msg.content)
+                            # Intentar extraer el contenido real del resultado
+                            if "content=" in result_data:
+                                start_idx = result_data.find("content=") + 8  # Longitud de "content="
+                                content_str = result_data[start_idx:]
+                                # Limpiar y formatear el resultado
+                                if content_str.strip() and content_str != "None":
+                                    print("\n   📊 Resultado de Azure DevOps:")
+                                    print(content_str)
                             continue
                         # Imprimir contenido normal
                         print(msg.content)
