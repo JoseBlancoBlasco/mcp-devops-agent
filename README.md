@@ -10,6 +10,7 @@ Un agente de DevOps basado en inteligencia artificial que utiliza el protocolo M
 - Integración con Azure OpenAI para procesamiento de lenguaje natural
 - Framework AutoGen para conversaciones interactivas con IA avanzada
 - Detección automática de consultas sobre work items por ID
+- Visualización mejorada de respuestas JSON con formato legible y estructurado
 
 ## Tecnologías utilizadas
 
@@ -50,7 +51,7 @@ AZDO_PAT=personal_access_token
 Ejecute el script principal:
 
 ```
-python main.py
+python azdo_mcp_test.py
 ```
 
 ## Comandos especiales
@@ -60,6 +61,7 @@ python main.py
 - `!pipes` - Listar pipelines
 - `!consulta "texto"` - Realizar una consulta en lenguaje natural
 - `!item <id>` - Consultar un work item específico por su ID
+- `!get_me` - Obtener información del usuario autenticado con formato mejorado
 - `debug` - Activar/desactivar modo de depuración
 
 ## Ejemplos de consultas
@@ -69,15 +71,21 @@ python main.py
 - "Pipelines activos en 2025"
 - "Dame información sobre el item 21101"
 - "Muéstrame los detalles del work item 5432"
+- "Ejecuta get_me para ver mi información de usuario"
 
 ## Arquitectura
 
 El proyecto está estructurado en varios componentes principales:
 
-- `main.py`: Punto de entrada que configura el entorno, inicializa el servidor MCP y crea los agentes de AutoGen
-- `mcp_server.py`: Gestiona el servidor MCP que permite la comunicación entre el agente y las herramientas externas
-- `mcp_client.py`: Cliente para conectar los agentes de AutoGen con el servidor MCP
+- `azdo_mcp_test.py`: Punto de entrada que configura el entorno, inicializa el servidor MCP y crea los agentes de AutoGen
+- `devops_server.py`: Gestiona el servidor MCP que permite la comunicación entre el agente y las herramientas externas
 - `azdo_tools.py`: Implementación de las herramientas para interactuar con Azure DevOps
+
+## Mejoras recientes
+
+- **Visualización de respuestas JSON**: Se ha mejorado la interpretación y visualización de respuestas JSON para facilitar la lectura de datos estructurados.
+- **Detección inteligente de formato**: El sistema ahora detecta automáticamente si una respuesta es JSON y aplica un formato adecuado.
+- **Indentación y estructuración**: Las respuestas JSON ahora se muestran con indentación para mejorar su legibilidad.
 
 ## Colaboración
 
