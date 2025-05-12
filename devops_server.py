@@ -17,7 +17,7 @@ from mcp.types import (
     INTERNAL_ERROR,
 )
 
-from azdo_tools import AzureDevOpsTool
+from devops_tools import AzureDevOpsTool
 
 
 class WorkItemsQuery(BaseModel):

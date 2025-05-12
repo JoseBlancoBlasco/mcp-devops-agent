@@ -625,6 +625,163 @@ class AzureDevOpsTool:
         
         response.raise_for_status()
         return response.json()
+    
+    def create_work_item(self, title: str, work_item_type: str, description: str, assigned_to: Optional[str] = None, tags: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+        """Crear un nuevo work item"""
+        project_to_use = project or self.project
+        if not project_to_use:
+            raise ValueError("Se requiere un proyecto para crear un work item")
+        
+        url = f"{self.organization}/{project_to_use}/_apis/wit/workitems/${work_item_type}?api-version=7.0"
+        headers = self.headers.copy()
+        headers["Content-Type"] = "application/json-patch+json"
+
+        body = [
+            {"op": "add", "path": "/fields/System.Title", "value": title},
+            {"op": "add", "path": "/fields/System.Description", "value": description}
+        ]
+        
+        if assigned_to:
+            body.append({"op": "add", "path": "/fields/System.AssignedTo", "value": assigned_to})
+        if tags:
+            body.append({"op": "add", "path": "/fields/System.Tags", "value": tags})
+        
+        response = requests.post(url, headers=headers, json=body)
+        response.raise_for_status()
+        return response.json()
+    
+    def update_work_item(self, work_item_id: int, updates: List[Dict[str, Any]], project: Optional[str] = None) -> Dict[str, Any]:
+        """Actualizar campos de un work item existente"""
+        project_to_use = project or self.project
+        url = f"{self.organization}/{project_to_use}/_apis/wit/workitems/{work_item_id}?api-version=7.0"
+        headers = self.headers.copy()
+        headers["Content-Type"] = "application/json-patch+json"
+        
+        response = requests.patch(url, headers=headers, json=updates)
+        response.raise_for_status()
+        return response.json()
+
+    def add_work_item_comment(self, work_item_id: int, comment: str, project: Optional[str] = None) -> Dict[str, Any]:
+        """Agregar un comentario a un work item"""
+        project_to_use = project or self.project
+        url = f"{self.organization}/{project_to_use}/_apis/wit/workItems/{work_item_id}/comments?api-version=7.0-preview.3"
+        
+        response = requests.post(url, headers=self.headers, json={"text": comment})
+        response.raise_for_status()
+        return response.json()
+    
+    def link_work_items(self, source_id: int, target_id: int, rel: str = "System.LinkTypes.Related", comment: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+        """Relacionar dos work items (por defecto: Related)"""
+        project_to_use = project or self.project
+        url = f"{self.organization}/{project_to_use}/_apis/wit/workitems/{source_id}?api-version=7.0"
+        headers = self.headers.copy()
+        headers["Content-Type"] = "application/json-patch+json"
+
+        body = [
+            {
+                "op": "add",
+                "path": "/relations/-",
+                "value": {
+                    "rel": rel,
+                    "url": f"{self.organization}/_apis/wit/workItems/{target_id}",
+                    "attributes": {
+                        "comment": comment or f"Vinculado a {target_id}"
+                    }
+                }
+            }
+        ]
+        
+        response = requests.patch(url, headers=headers, json=body)
+        response.raise_for_status()
+        return response.json()
+
+    def clone_work_item(self, work_item_id: int, new_title: str, project: Optional[str] = None) -> Dict[str, Any]:
+        """Clonar un work item con nuevo título"""
+        original = self.get_work_item(work_item_id, project)
+        fields = original.get("fields", {})
+        work_item_type = fields.get("System.WorkItemType", "Task")
+        description = fields.get("System.Description", "")
+        tags = fields.get("System.Tags", "")
+
+        return self.create_work_item(
+            title=new_title,
+            work_item_type=work_item_type,
+            description=description,
+            assigned_to=None,
+            tags=tags,
+            project=project
+        )
+
+    def get_work_item_history(self, work_item_id: int, project: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Obtener el historial de un work item"""
+        project_to_use = project or self.project
+        url = f"{self.organization}/{project_to_use}/_apis/wit/workItems/{work_item_id}/updates?api-version=7.0"
+        
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+        return response.json().get("value", [])
+
+    def get_work_item_attachments(self, work_item_id: int, project: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Obtener adjuntos de un work item"""
+        item = self.get_work_item(work_item_id, project)
+        return [rel for rel in item.get("relations", []) if rel.get("rel") == "AttachedFile"]
+
+    def add_work_item_attachment(self, work_item_id: int, file_path: str, comment: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+        """Subir y adjuntar archivo a un work item"""
+        project_to_use = project or self.project
+        with open(file_path, "rb") as f:
+            upload_url = f"{self.organization}/{project_to_use}/_apis/wit/attachments?fileName={os.path.basename(file_path)}&api-version=7.0"
+            upload_response = requests.post(upload_url, headers=self.headers, data=f)
+            upload_response.raise_for_status()
+            attachment_url = upload_response.json()["url"]
+
+        patch_url = f"{self.organization}/{project_to_use}/_apis/wit/workitems/{work_item_id}?api-version=7.0"
+        headers = self.headers.copy()
+        headers["Content-Type"] = "application/json-patch+json"
+
+        body = [
+            {
+                "op": "add",
+                "path": "/relations/-",
+                "value": {
+                    "rel": "AttachedFile",
+                    "url": attachment_url,
+                    "attributes": {
+                        "comment": comment or "Archivo adjunto"
+                    }
+                }
+            }
+        ]
+
+        response = requests.patch(patch_url, headers=headers, json=body)
+        response.raise_for_status()
+        return response.json()
+
+    def get_work_item_tags(self, work_item_id: int, project: Optional[str] = None) -> List[str]:
+        """Obtener etiquetas (tags) de un work item"""
+        item = self.get_work_item(work_item_id, project)
+        tags_str = item.get("fields", {}).get("System.Tags", "")
+        return [t.strip() for t in tags_str.split(";") if t.strip()]
+
+    def update_work_item_tags(self, work_item_id: int, tags: List[str], project: Optional[str] = None) -> Dict[str, Any]:
+        """Actualizar etiquetas de un work item"""
+        project_to_use = project or self.project
+        url = f"{self.organization}/{project_to_use}/_apis/wit/workitems/{work_item_id}?api-version=7.0"
+        headers = self.headers.copy()
+        headers["Content-Type"] = "application/json-patch+json"
+        
+        tag_string = "; ".join(tags)
+        body = [{
+            "op": "add",
+            "path": "/fields/System.Tags",
+            "value": tag_string
+        }]
+        
+        response = requests.patch(url, headers=headers, json=body)
+        response.raise_for_status()
+        return response.json()
+
+
 
 # Funciones para registrar con MCP
 def register_azdo_tools_with_mcp(mcp_tool, tool_idx=0):

@@ -6,7 +6,7 @@ from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 from autogen_agentchat.messages import TextMessage
-from azdo_tools import AzureDevOpsTool
+from devops_tools import AzureDevOpsTool
 
 # Cargar variables de entorno
 load_dotenv()
