@@ -32,6 +32,9 @@ ENV/
 *.log
 logs/
 
+# Cache files
+.cache/
+
 # Azure DevOps PAT tokens and other sensitive files
 *.pat
 *.token
