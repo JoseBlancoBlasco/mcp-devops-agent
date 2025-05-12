@@ -1,5 +1,6 @@
 from typing import Annotated, List, Dict, Any, Optional
 import os
+import asyncio
 from pydantic import BaseModel, Field
 
 from mcp.shared.exceptions import McpError
@@ -91,6 +92,64 @@ class PullRequestCommentCreate(BaseModel):
     comment: Annotated[str, Field(description="Texto del comentario a añadir")]
     thread_id: Annotated[Optional[int], Field(default=None, description="ID del hilo de comentarios (para responder a un comentario existente)")]
 
+
+class WorkItemCreateModel(BaseModel):
+    """Parámetros para crear un nuevo work item."""
+    project: Annotated[str, Field(description="Nombre del proyecto de Azure DevOps")]
+    title: Annotated[str, Field(description="Título del work item")]
+    work_item_type: Annotated[str, Field(description="Tipo de work item (Epic, User Story, Task, Bug, etc.)")]
+    description: Annotated[str, Field(description="Descripción detallada del work item")]
+    assigned_to: Annotated[Optional[str], Field(default=None, description="Nombre o email de la persona asignada")]
+    tags: Annotated[Optional[str], Field(default=None, description="Etiquetas separadas por punto y coma (ej. 'tag1; tag2; tag3')")]
+
+
+class WorkItemUpdateModel(BaseModel):
+    """Parámetros para actualizar un work item existente."""
+    project: Annotated[str, Field(description="Nombre del proyecto de Azure DevOps")]
+    work_item_id: Annotated[int, Field(description="ID del work item a actualizar")]
+    title: Annotated[Optional[str], Field(default=None, description="Nuevo título del work item")]
+    description: Annotated[Optional[str], Field(default=None, description="Nueva descripción del work item")]
+    state: Annotated[Optional[str], Field(default=None, description="Nuevo estado del work item")]
+    assigned_to: Annotated[Optional[str], Field(default=None, description="Nueva persona asignada")]
+    tags: Annotated[Optional[str], Field(default=None, description="Nuevas etiquetas separadas por punto y coma")]
+
+
+class WorkItemCommentModel(BaseModel):
+    """Parámetros para añadir un comentario a un work item."""
+    project: Annotated[str, Field(description="Nombre del proyecto de Azure DevOps")]
+    work_item_id: Annotated[int, Field(description="ID del work item")]
+    comment: Annotated[str, Field(description="Texto del comentario a añadir")]
+
+
+class WorkItemLinkModel(BaseModel):
+    """Parámetros para vincular dos work items."""
+    project: Annotated[str, Field(description="Nombre del proyecto de Azure DevOps")]
+    source_id: Annotated[int, Field(description="ID del work item origen")]
+    target_id: Annotated[int, Field(description="ID del work item destino")]
+    rel: Annotated[Optional[str], Field(default="System.LinkTypes.Related", description="Tipo de relación")]
+    comment: Annotated[Optional[str], Field(default=None, description="Comentario sobre la relación")]
+
+
+class WorkItemCloneModel(BaseModel):
+    """Parámetros para clonar un work item."""
+    project: Annotated[str, Field(description="Nombre del proyecto de Azure DevOps")]
+    work_item_id: Annotated[int, Field(description="ID del work item a clonar")]
+    new_title: Annotated[str, Field(description="Título para el nuevo work item clonado")]
+
+
+class WorkItemHistoryQuery(BaseModel):
+    """Parámetros para obtener el historial de un work item."""
+    project: Annotated[str, Field(description="Nombre del proyecto de Azure DevOps")]
+    work_item_id: Annotated[int, Field(description="ID del work item")]
+
+
+class WorkItemTagsModel(BaseModel):
+    """Parámetros para actualizar etiquetas de un work item."""
+    project: Annotated[str, Field(description="Nombre del proyecto de Azure DevOps")]
+    work_item_id: Annotated[int, Field(description="ID del work item")]
+    tags: Annotated[List[str], Field(description="Lista de etiquetas a establecer")]
+
+
 class GetMeQuery(BaseModel):
     """No necesita parámetros para obtener información del usuario autenticado"""
     pass
@@ -130,6 +189,41 @@ async def serve() -> None:
                 name="get_work_item",
                 description="Obtiene todos los detalles de un work item específico por su ID.",
                 inputSchema=WorkItemQuery.model_json_schema(),
+            ),
+            Tool(
+                name="create_work_item",
+                description="Crea un nuevo work item en un proyecto de Azure DevOps.",
+                inputSchema=WorkItemCreateModel.model_json_schema(),
+            ),
+            Tool(
+                name="update_work_item",
+                description="Actualiza un work item existente en Azure DevOps.",
+                inputSchema=WorkItemUpdateModel.model_json_schema(),
+            ),
+            Tool(
+                name="add_work_item_comment",
+                description="Añade un comentario a un work item existente.",
+                inputSchema=WorkItemCommentModel.model_json_schema(),
+            ),
+            Tool(
+                name="link_work_items",
+                description="Vincula dos work items con una relación específica.",
+                inputSchema=WorkItemLinkModel.model_json_schema(),
+            ),
+            Tool(
+                name="clone_work_item",
+                description="Crea una copia de un work item existente con un nuevo título.",
+                inputSchema=WorkItemCloneModel.model_json_schema(),
+            ),
+            Tool(
+                name="get_work_item_history",
+                description="Obtiene el historial de cambios de un work item.",
+                inputSchema=WorkItemHistoryQuery.model_json_schema(),
+            ),
+            Tool(
+                name="update_work_item_tags",
+                description="Actualiza las etiquetas de un work item.",
+                inputSchema=WorkItemTagsModel.model_json_schema(),
             ),
             Tool(
                 name="list_repositories",
@@ -374,6 +468,221 @@ async def serve() -> None:
                         rel_id = rel_url.split('/')[-1] if '/' in rel_url else 'N/A'
                         
                         result += f"- {rel_type}: {rel_id}\n"
+                
+                return [TextContent(type="text", text=result)]
+            
+            elif name == "create_work_item":
+                try:
+                    args = WorkItemCreateModel(**arguments)
+                except ValueError as e:
+                    raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+                
+                work_item = azdo.create_work_item(
+                    title=args.title,
+                    work_item_type=args.work_item_type,
+                    description=args.description,
+                    assigned_to=args.assigned_to,
+                    tags=args.tags,
+                    project=args.project
+                )
+                
+                if not work_item:
+                    return [TextContent(
+                        type="text", 
+                        text=f"No se pudo crear el work item en el proyecto {args.project}."
+                    )]
+                
+                # Formatear la salida para confirmar la creación
+                result = f"Work Item creado correctamente:\n\n"
+                result += f"ID: #{work_item.get('id')}\n"
+                result += f"Título: {work_item.get('fields', {}).get('System.Title', 'N/A')}\n"
+                result += f"Tipo: {work_item.get('fields', {}).get('System.WorkItemType', 'N/A')}\n"
+                result += f"Estado: {work_item.get('fields', {}).get('System.State', 'N/A')}\n"
+                result += f"URL: {work_item.get('_links', {}).get('html', {}).get('href', 'N/A')}\n"
+                
+                return [TextContent(type="text", text=result)]
+            
+            elif name == "update_work_item":
+                try:
+                    args = WorkItemUpdateModel(**arguments)
+                except ValueError as e:
+                    raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+                
+                # Construir la lista de actualizaciones
+                updates = []
+                
+                if args.title:
+                    updates.append({"op": "add", "path": "/fields/System.Title", "value": args.title})
+                
+                if args.description:
+                    updates.append({"op": "add", "path": "/fields/System.Description", "value": args.description})
+                
+                if args.state:
+                    updates.append({"op": "add", "path": "/fields/System.State", "value": args.state})
+                
+                if args.assigned_to:
+                    updates.append({"op": "add", "path": "/fields/System.AssignedTo", "value": args.assigned_to})
+                
+                if args.tags:
+                    updates.append({"op": "add", "path": "/fields/System.Tags", "value": args.tags})
+                
+                if not updates:
+                    return [TextContent(
+                        type="text", 
+                        text=f"No se proporcionaron campos para actualizar en el work item {args.work_item_id}."
+                    )]
+                
+                # Realizar la actualización
+                work_item = azdo.update_work_item(
+                    args.work_item_id,
+                    updates,
+                    args.project
+                )
+                
+                if not work_item:
+                    return [TextContent(
+                        type="text", 
+                        text=f"No se pudo actualizar el work item {args.work_item_id} en el proyecto {args.project}."
+                    )]
+                
+                # Formatear la salida para confirmar la actualización
+                result = f"Work Item #{args.work_item_id} actualizado correctamente:\n\n"
+                result += f"Título: {work_item.get('fields', {}).get('System.Title', 'N/A')}\n"
+                result += f"Estado: {work_item.get('fields', {}).get('System.State', 'N/A')}\n"
+                
+                return [TextContent(type="text", text=result)]
+            
+            elif name == "add_work_item_comment":
+                try:
+                    args = WorkItemCommentModel(**arguments)
+                except ValueError as e:
+                    raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+                
+                comment_result = azdo.add_work_item_comment(
+                    args.work_item_id,
+                    args.comment,
+                    args.project
+                )
+                
+                if not comment_result:
+                    return [TextContent(
+                        type="text", 
+                        text=f"No se pudo añadir el comentario al work item {args.work_item_id}."
+                    )]
+                
+                # Formatear la salida para confirmar que se añadió el comentario
+                result = f"Comentario añadido correctamente al Work Item #{args.work_item_id}.\n"
+                
+                return [TextContent(type="text", text=result)]
+            
+            elif name == "link_work_items":
+                try:
+                    args = WorkItemLinkModel(**arguments)
+                except ValueError as e:
+                    raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+                
+                link_result = azdo.link_work_items(
+                    args.source_id,
+                    args.target_id,
+                    args.rel,
+                    args.comment,
+                    args.project
+                )
+                
+                if not link_result:
+                    return [TextContent(
+                        type="text", 
+                        text=f"No se pudo vincular el work item {args.source_id} con el {args.target_id}."
+                    )]
+                
+                # Formatear la salida para confirmar que se vincularon los work items
+                result = f"Work Items vinculados correctamente:\n\n"
+                result += f"Work Item #{args.source_id} → {args.rel} → Work Item #{args.target_id}\n"
+                
+                return [TextContent(type="text", text=result)]
+            
+            elif name == "clone_work_item":
+                try:
+                    args = WorkItemCloneModel(**arguments)
+                except ValueError as e:
+                    raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+                
+                clone_result = azdo.clone_work_item(
+                    args.work_item_id,
+                    args.new_title,
+                    args.project
+                )
+                
+                if not clone_result:
+                    return [TextContent(
+                        type="text", 
+                        text=f"No se pudo clonar el work item {args.work_item_id}."
+                    )]
+                
+                # Formatear la salida para confirmar que se clonó el work item
+                result = f"Work Item clonado correctamente:\n\n"
+                result += f"Work Item Original: #{args.work_item_id}\n"
+                result += f"Nuevo Work Item: #{clone_result.get('id')}\n"
+                result += f"Nuevo Título: {clone_result.get('fields', {}).get('System.Title', 'N/A')}\n"
+                
+                return [TextContent(type="text", text=result)]
+            
+            elif name == "get_work_item_history":
+                try:
+                    args = WorkItemHistoryQuery(**arguments)
+                except ValueError as e:
+                    raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+                
+                history = azdo.get_work_item_history(args.work_item_id, args.project)
+                
+                if not history:
+                    return [TextContent(
+                        type="text", 
+                        text=f"No se encontró historial para el work item {args.work_item_id}."
+                    )]
+                
+                # Formatear la salida para mostrar el historial
+                result = f"Historial del Work Item #{args.work_item_id}:\n\n"
+                
+                for idx, update in enumerate(history, 1):
+                    revised_by = update.get('revisedBy', {}).get('displayName', 'N/A')
+                    revised_date = update.get('revisedDate', 'N/A')
+                    
+                    result += f"{idx}. Modificado por: {revised_by} el {revised_date}\n"
+                    
+                    # Mostrar campos cambiados
+                    if 'fields' in update:
+                        result += "   Cambios:\n"
+                        for field_name, field_value in update['fields'].items():
+                            old_value = field_value.get('oldValue', 'N/A')
+                            new_value = field_value.get('newValue', 'N/A')
+                            result += f"   - {field_name}: {old_value} → {new_value}\n"
+                    
+                    result += "\n"
+                
+                return [TextContent(type="text", text=result)]
+            
+            elif name == "update_work_item_tags":
+                try:
+                    args = WorkItemTagsModel(**arguments)
+                except ValueError as e:
+                    raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
+                
+                tags_result = azdo.update_work_item_tags(
+                    args.work_item_id,
+                    args.tags,
+                    args.project
+                )
+                
+                if not tags_result:
+                    return [TextContent(
+                        type="text", 
+                        text=f"No se pudieron actualizar las etiquetas del work item {args.work_item_id}."
+                    )]
+                
+                # Formatear la salida para confirmar que se actualizaron las etiquetas
+                result = f"Etiquetas actualizadas correctamente para el Work Item #{args.work_item_id}.\n\n"
+                result += f"Nuevas etiquetas: {'; '.join(args.tags)}\n"
                 
                 return [TextContent(type="text", text=result)]
             
